@@ -10,4 +10,5 @@ sshmux can only forward normal sessions (ssh'ing directly to sshmux without a Pr
 
 Using a "ssh -W" ProxyCommand circumvents this limitation, both for ssh and sftp/scp, and also bypasses the interactive server selection, as the client will inform sshmux of the wanted target directly. If the target is permitted, the user will be connected. This also provides more protection for the paranoid, as the connection to the final host is encrypted end-to-end, rather than being plaintext in the memory of sshmux (not something I would worry too much about if the server is solely in your control).
 
-
+# But i just want to run it...
+Look at sshmuxd instead, then: https://github.com/joushou/sshmuxd
