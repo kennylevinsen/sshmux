@@ -17,7 +17,7 @@ func DefaultInteractive(comm io.ReadWriter, session *Session) (string, error) {
 		fmt.Fprintf(comm, "    [%d] %s\r\n", i, v)
 	}
 
-	// Beware, nasty comm parsing loop
+	// Beware, nasty input parsing loop
 loop:
 	for {
 		fmt.Fprintf(comm, "Please select remote server: ")
@@ -39,7 +39,7 @@ loop:
 					fmt.Fprintf(comm, "\r\n")
 					res, err := strconv.ParseInt(string(buf), 10, 64)
 					if err != nil {
-						fmt.Fprintf(comm, "comm not a valid integer. Please try again\r\n")
+						fmt.Fprintf(comm, "input not a valid integer. Please try again\r\n")
 						continue loop
 					}
 					if int(res) >= len(remotes) || res < 0 {
