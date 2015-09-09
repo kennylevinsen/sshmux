@@ -85,6 +85,14 @@ func (s *Server) ChannelForward(session *Session, newChannel ssh.NewChannel) {
 		return
 	}
 
+	// Log the selection
+	if s.Selected != nil {
+		if err := s.Selected(session, address); err != nil {
+			newChannel.Reject(ssh.Prohibited, "access denied")
+			return
+		}
+	}
+
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
 		newChannel.Reject(ssh.ConnectionFailed, fmt.Sprintf("error: %v", err))
@@ -132,6 +140,7 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 	remote := ""
 	switch len(session.Remotes) {
 	case 0:
+		fmt.Fprintf(stderr, "User has no permitted remote hosts.\r\n")
 		sesschan.Close()
 		return
 	case 1:
@@ -144,6 +153,15 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 			remote, err = s.Interactive(comm, session)
 		}
 		if err != nil {
+			sesschan.Close()
+			return
+		}
+	}
+
+	// Log the selection
+	if s.Selected != nil {
+		if err = s.Selected(session, remote); err != nil {
+			fmt.Fprintf(stderr, "Remote host selection denied.\r\n")
 			sesschan.Close()
 			return
 		}

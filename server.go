@@ -53,7 +53,13 @@ type Server struct {
 	// user and the connection is terminated. The io.ReadWriter is to be used
 	// for user interaction.
 	Interactive func(io.ReadWriter, *Session) (string, error)
-	sshConfig   *ssh.ServerConfig
+
+	// Selected is called when a remote host has been decided upon. The main
+	// purpose of this callback is logging, but returning an error will
+	// terminate the connection, allowing it to be used as a last-minute
+	// bailout.
+	Selected  func(*Session, string) error
+	sshConfig *ssh.ServerConfig
 }
 
 type publicKey struct {
