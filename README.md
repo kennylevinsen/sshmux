@@ -1,4 +1,4 @@
-# sshmux [![GoDoc](https://godoc.org/github.com/joushou/sshmux?status.svg)](http://godoc.org/github.com/joushou/sshmux) [![Build Status](https://travis-ci.org/joushou/sshmux.svg?branch=master)](https://travis-ci.org/joushou/sshmux) [![Go Report Card](https://goreportcard.com/badge/joushou/sshmuxd)](https://goreportcard.com/report/joushou/sshmux)
+# sshmux [![GoDoc](https://godoc.org/github.com/joushou/sshmux?status.svg)](http://godoc.org/github.com/joushou/sshmux) [![Build Status](https://travis-ci.org/joushou/sshmux.svg?branch=master)](https://travis-ci.org/joushou/sshmux) [![Go Report Card](https://goreportcard.com/badge/joushou/sshmux)](https://goreportcard.com/report/joushou/sshmux)
 SSH multiplexing library, allowing you to write "jump host" style proxies.
 
 sshmux supports jumps through agent-forwarding or secure channel forwarding (ssh -W). For ssh session channels, it also allows for interactive selection of destination. Secure channel forwarding is not interactive, but simply verifies the requested final destination against the permitted hosts list.
