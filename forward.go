@@ -188,6 +188,7 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 	ag := agent.NewClient(agentChan)
 
 	clientConfig := &ssh.ClientConfig{
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		User: session.Conn.User(),
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeysCallback(ag.Signers),
