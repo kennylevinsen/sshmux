@@ -135,6 +135,27 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 		return
 	}
 
+	// Proxy the channel and its requests
+	maskedReqs := make(chan *ssh.Request, 1)
+	go func() {
+		for req := range sessReqs {
+			// Filter out auth agent requests, and answer some request types immediately in order to cope with PuTTY.
+			switch req.Type {
+			case "auth-agent-req@openssh.com":
+				if req.WantReply {
+					req.Reply(true, []byte{})
+				}
+				continue
+			case "pty-req", "shell":
+				if req.WantReply {
+					req.Reply(true, []byte{})
+					req.WantReply = false
+				}
+			}
+			maskedReqs <- req
+		}
+	}()
+
 	stderr := sesschan.Stderr()
 
 	remote := ""
@@ -237,16 +258,6 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 		return
 	}
 
-	// Proxy the channel and its requests
-	maskedReqs := make(chan *ssh.Request, 1)
-	go func() {
-		for req := range sessReqs {
-			if req.Type == "auth-agent-req@openssh.com" {
-				continue
-			}
-			maskedReqs <- req
-		}
-	}()
 	proxy(maskedReqs, reqs2, sesschan, channel2)
 
 }
