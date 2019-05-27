@@ -59,6 +59,11 @@ type Server struct {
 	// terminate the connection, allowing it to be used as a last-minute
 	// bailout.
 	Selected  func(*Session, string) error
+
+	// Dialer specifies a dial-up function used to establish the underlying
+	// network connection to the ssh servers. Defaults to net.Dial.
+	Dialer func(network, address string) (net.Conn, error)
+
 	sshConfig *ssh.ServerConfig
 }
 
@@ -163,6 +168,7 @@ func New(signer ssh.Signer, auth func(ssh.ConnMetadata, ssh.PublicKey) (*User, e
 	server := &Server{
 		Auther: auth,
 		Setup:  setup,
+		Dialer: net.Dial,
 	}
 
 	server.sshConfig = &ssh.ServerConfig{

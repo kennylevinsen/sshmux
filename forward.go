@@ -3,7 +3,6 @@ package sshmux
 import (
 	"fmt"
 	"io"
-	"net"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
@@ -58,6 +57,7 @@ func proxy(reqs1, reqs2 <-chan *ssh.Request, channel1, channel2 ssh.Channel) {
 	}
 }
 
+// https://tools.ietf.org/html/rfc4254
 type channelOpenDirectMsg struct {
 	RAddr string
 	RPort uint32
@@ -93,7 +93,7 @@ func (s *Server) ChannelForward(session *Session, newChannel ssh.NewChannel) {
 		}
 	}
 
-	conn, err := net.Dial("tcp", address)
+	conn, err := s.Dialer("tcp", address)
 	if err != nil {
 		newChannel.Reject(ssh.ConnectionFailed, fmt.Sprintf("error: %v", err))
 		return
@@ -216,12 +216,21 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 		},
 	}
 
-	client, err := ssh.Dial("tcp", remote, clientConfig)
+	conn, err := s.Dialer("tcp", remote)
 	if err != nil {
 		fmt.Fprintf(stderr, "Connect failed: %v\r\n", err)
 		sesschan.Close()
 		return
 	}
+	defer conn.Close()
+
+	clientConn, clientChans, clientReqs, err := ssh.NewClientConn(conn, remote, clientConfig)
+	if err != nil {
+		fmt.Fprintf(stderr, "Client connection setup failed: %v\r\n", err)
+		sesschan.Close()
+		return
+	}
+	client := ssh.NewClient(clientConn, clientChans, clientReqs)
 
 	// Handle all incoming channel requests
 	go func() {
