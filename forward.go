@@ -156,6 +156,11 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 					req.Reply(true, []byte{})
 					req.WantReply = false
 				}
+			case "keepalive@openssh.com":
+				if req.WantReply {
+					req.Reply(true, []byte{})
+					req.WantReply = false
+				}
 			}
 			maskedReqs <- req
 		}

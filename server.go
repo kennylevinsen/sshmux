@@ -126,7 +126,20 @@ func (s *Server) HandleConn(c net.Conn) {
 
 	s.Setup(session)
 
-	go ssh.DiscardRequests(reqs)
+
+	go func() {
+		for req := range reqs {
+			switch req.Type {
+			case "keepalive@openssh.com":
+				if req.WantReply {
+					req.Reply(true, []byte{})
+				}
+			default:
+				req.Reply(false, []byte{})
+			}
+		}
+	}()
+
 	newChannel := <-chans
 	if newChannel == nil {
 		sshConn.Close()
