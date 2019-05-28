@@ -8,6 +8,17 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+type Remote struct {
+	// The various names that can be used to select this remote
+	Names []string
+
+	// The description used for interactive prompting
+	Description string
+
+	// The address of this remote
+	Address string
+}
+
 // User describes an authenticable user.
 type User struct {
 	// The public key of the user.
@@ -27,7 +38,7 @@ type Session struct {
 	User *User
 
 	// Remotes is the allowed set of remote hosts.
-	Remotes []string
+	Remotes []*Remote
 
 	// PublicKey is the public key used in this session.
 	PublicKey ssh.PublicKey
@@ -48,11 +59,11 @@ type Server struct {
 	Setup func(*Session) error
 
 	// Interactive is called to ask the user to select a host on the list of
-	// potential remote hosts. This is only called in the case wehre more than
+	// potential remote hosts. This is only called in the case where more than
 	// one option is available. If an error is returned, it is presented to the
 	// user and the connection is terminated. The io.ReadWriter is to be used
 	// for user interaction.
-	Interactive func(io.ReadWriter, *Session) (string, error)
+	Interactive func(io.ReadWriter, *Session) (*Remote, error)
 
 	// Selected is called when a remote host has been decided upon. The main
 	// purpose of this callback is logging, but returning an error will

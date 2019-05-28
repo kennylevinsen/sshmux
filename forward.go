@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -72,28 +73,30 @@ func (s *Server) ChannelForward(session *Session, newChannel ssh.NewChannel) {
 	ssh.Unmarshal(newChannel.ExtraData(), &msg)
 	address := fmt.Sprintf("%s:%d", msg.RAddr, msg.RPort)
 
-	permitted := false
+	var selected *Remote
 	for _, remote := range session.Remotes {
-		if remote == address {
-			permitted = true
-			break
+		for _, name := range remote.Names {
+			if name == address {
+				selected = remote
+				break
+			}
 		}
 	}
 
-	if !permitted {
+	if selected == nil {
 		newChannel.Reject(ssh.Prohibited, "remote host access denied for user")
 		return
 	}
 
 	// Log the selection
 	if s.Selected != nil {
-		if err := s.Selected(session, address); err != nil {
+		if err := s.Selected(session, selected.Address); err != nil {
 			newChannel.Reject(ssh.Prohibited, "access denied")
 			return
 		}
 	}
 
-	conn, err := s.Dialer("tcp", address)
+	conn, err := s.Dialer("tcp", selected.Address)
 	if err != nil {
 		newChannel.Reject(ssh.ConnectionFailed, fmt.Sprintf("error: %v", err))
 		return
@@ -113,10 +116,8 @@ func (s *Server) ChannelForward(session *Session, newChannel ssh.NewChannel) {
 		closer.Do(closeFunc)
 	}()
 
-	go func() {
-		io.Copy(conn, channel)
-		closer.Do(closeFunc)
-	}()
+	io.Copy(conn, channel)
+	closer.Do(closeFunc)
 }
 
 type rw struct {
@@ -134,6 +135,9 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 	if err != nil {
 		return
 	}
+	defer sesschan.Close()
+
+	agentCh := make(chan struct{})
 
 	// Proxy the channel and its requests
 	maskedReqs := make(chan *ssh.Request, 1)
@@ -145,6 +149,7 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 				if req.WantReply {
 					req.Reply(true, []byte{})
 				}
+				agentCh <- struct{}{}
 				continue
 			case "pty-req", "shell":
 				if req.WantReply {
@@ -158,14 +163,14 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 
 	stderr := sesschan.Stderr()
 
-	remote := ""
+	var remote *Remote
 	switch len(session.Remotes) {
 	case 0:
 		fmt.Fprintf(stderr, "User has no permitted remote hosts.\r\n")
-		sesschan.Close()
 		return
 	case 1:
 		remote = session.Remotes[0]
+		fmt.Fprintf(stderr, "Selecting only remote: %s\r\n", remote.Description)
 	default:
 		comm := rw{Reader: sesschan, Writer: stderr}
 		if s.Interactive == nil {
@@ -174,31 +179,34 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 			remote, err = s.Interactive(comm, session)
 		}
 		if err != nil {
-			sesschan.Close()
 			return
 		}
 	}
 
 	// Log the selection
 	if s.Selected != nil {
-		if err = s.Selected(session, remote); err != nil {
+		if err = s.Selected(session, remote.Address); err != nil {
 			fmt.Fprintf(stderr, "Remote host selection denied.\r\n")
-			sesschan.Close()
 			return
 		}
 	}
 
-	fmt.Fprintf(stderr, "Connecting to %s\r\n", remote)
+	fmt.Fprintf(stderr, "Connecting to %s\r\n", remote.Address)
 
 	// Set up the agent
-
-	agentChan, agentReqs, err := session.Conn.OpenChannel("auth-agent@openssh.com", nil)
-	if err != nil {
+	select {
+	case <-agentCh:
+	case <-time.After(1 * time.Second):
 		fmt.Fprintf(stderr, "\r\n====== sshmux ======\r\n")
 		fmt.Fprintf(stderr, "sshmux requires either agent forwarding or secure channel forwarding.\r\n")
 		fmt.Fprintf(stderr, "Either enable agent forwarding (-A), or use a ssh -W proxy command.\r\n")
 		fmt.Fprintf(stderr, "For more info, see the sshmux wiki.\r\n")
-		sesschan.Close()
+		return
+	}
+
+	agentChan, agentReqs, err := session.Conn.OpenChannel("auth-agent@openssh.com", nil)
+	if err != nil {
+		fmt.Fprintf(stderr, "agent forwarding failed: %+v", err)
 		return
 	}
 	defer agentChan.Close()
@@ -213,21 +221,27 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 		User: session.Conn.User(),
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeysCallback(ag.Signers),
+			ssh.KeyboardInteractive(func(user, instruction string, questions []string, echos []bool) ([]string, error) {
+				comm := rw{Reader: sesschan, Writer: stderr}
+				return KeyboardChallenge(comm, user, instruction, questions, echos)
+			}),
+			ssh.PasswordCallback(func() (string, error) {
+				comm := rw{Reader: sesschan, Writer: stderr}
+				return PasswordCallback(comm, session.Conn.User() + "@" + remote.Address + ":")
+			}),
 		},
 	}
 
-	conn, err := s.Dialer("tcp", remote)
+	conn, err := s.Dialer("tcp", remote.Address)
 	if err != nil {
 		fmt.Fprintf(stderr, "Connect failed: %v\r\n", err)
-		sesschan.Close()
 		return
 	}
 	defer conn.Close()
 
-	clientConn, clientChans, clientReqs, err := ssh.NewClientConn(conn, remote, clientConfig)
+	clientConn, clientChans, clientReqs, err := ssh.NewClientConn(conn, remote.Address, clientConfig)
 	if err != nil {
 		fmt.Fprintf(stderr, "Client connection setup failed: %v\r\n", err)
-		sesschan.Close()
 		return
 	}
 	client := ssh.NewClient(clientConn, clientChans, clientReqs)
@@ -263,10 +277,8 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 	channel2, reqs2, err := client.OpenChannel("session", []byte{})
 	if err != nil {
 		fmt.Fprintf(stderr, "Remote session setup failed: %v\r\n", err)
-		sesschan.Close()
 		return
 	}
 
 	proxy(maskedReqs, reqs2, sesschan, channel2)
-
 }
