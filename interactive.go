@@ -11,6 +11,9 @@ import (
 // session forward.
 func DefaultInteractive(comm io.ReadWriter, session *Session) (*Remote, error) {
 	remotes := session.Remotes
+	if len(remotes) == 0 {
+		return nil, fmt.Errorf("no permitted remote hosts")
+	}
 
 	fmt.Fprintf(comm, "Welcome to sshmux, %s\r\n", session.Conn.User())
 	for i, v := range remotes {
@@ -33,7 +36,7 @@ loop:
 			}
 			n, err = comm.Read(b)
 			if n == 1 {
-				fmt.Fprintf(comm, "%s", b)
+				fmt.Fprintf(comm, "%s", b[0:1])
 				switch b[0] {
 				case '\r':
 					fmt.Fprintf(comm, "\r\n")
@@ -59,8 +62,8 @@ loop:
 	}
 }
 
-// PasswordCallback prompts the user for a password.
-func PasswordCallback(comm io.ReadWriter, prompt string) (string, error) {
+// StringCallback prompts the user for a password.
+func StringCallback(comm io.ReadWriter, prompt string, hide bool) (string, error) {
 	if _, err := fmt.Fprintf(comm, "%s ", prompt); err != nil {
 		return "", err
 	}
@@ -77,6 +80,14 @@ func PasswordCallback(comm io.ReadWriter, prompt string) (string, error) {
 		n, err = comm.Read(b)
 		if n == 1 {
 			switch b[0] {
+			case 0x7F, 0x08:
+				if len(buf) > 0 {
+					buf = buf[0:len(buf)-1]
+					if !hide {
+						fmt.Fprintf(comm, "\033[1D \033[1D")
+					}
+				}
+				continue
 			case '\r':
 				if _, err := fmt.Fprintf(comm, "\r\n"); err != nil {
 					return "", err
@@ -85,6 +96,9 @@ func PasswordCallback(comm io.ReadWriter, prompt string) (string, error) {
 			case 0x03:
 				fmt.Fprintf(comm, "\r\nGoodbye\r\n")
 				return "", errors.New("user terminated session")
+			}
+			if !hide {
+				fmt.Fprintf(comm, "%s", b[0:1])
 			}
 			buf = append(buf, b[0])
 		}

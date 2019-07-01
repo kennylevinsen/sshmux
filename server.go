@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -17,6 +18,9 @@ type Remote struct {
 
 	// The address of this remote
 	Address string
+
+	// The username to connect with
+	Username string
 }
 
 // User describes an authenticable user.
@@ -69,11 +73,19 @@ type Server struct {
 	// purpose of this callback is logging, but returning an error will
 	// terminate the connection, allowing it to be used as a last-minute
 	// bailout.
-	Selected  func(*Session, string) error
+	Selected func(*Session, string) error
 
 	// Dialer specifies a dial-up function used to establish the underlying
 	// network connection to the ssh servers. Defaults to net.Dial.
 	Dialer func(network, address string) (net.Conn, error)
+
+	// UsernamePrompt is used to prompt the user for a username. If nil, the
+	// username used to connect to sshmux will be used.
+	UsernamePrompt func(io.ReadWriter, *Session) (string, error)
+
+	// ConnectionTimeout specifies the timeout to use when forwarding a
+	// connection. If zero, a sensible default will be used.
+	ConnectionTimeout time.Duration
 
 	sshConfig *ssh.ServerConfig
 }

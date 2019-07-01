@@ -172,23 +172,30 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 	stderr := sesschan.Stderr()
 
 	var remote *Remote
-	switch len(session.Remotes) {
-	case 0:
-		fmt.Fprintf(stderr, "User has no permitted remote hosts.\r\n")
+	comm := rw{Reader: sesschan, Writer: stderr}
+	if s.Interactive == nil {
+		remote, err = DefaultInteractive(comm, session)
+	} else {
+		remote, err = s.Interactive(comm, session)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "Error selecting remote: %+v\r\n", err)
 		return
-	case 1:
-		remote = session.Remotes[0]
-		fmt.Fprintf(stderr, "Selecting only remote: %s\r\n", remote.Description)
-	default:
+	}
+
+	var username string
+
+	if s.UsernamePrompt != nil {
 		comm := rw{Reader: sesschan, Writer: stderr}
-		if s.Interactive == nil {
-			remote, err = DefaultInteractive(comm, session)
-		} else {
-			remote, err = s.Interactive(comm, session)
-		}
+		username, err = s.UsernamePrompt(comm, session)
 		if err != nil {
+			fmt.Fprintf(stderr, "username prompt failed: %+v", err)
 			return
 		}
+	} else if len(remote.Username) == 0 {
+		username = session.Conn.User()
+	} else {
+		username = remote.Username
 	}
 
 	// Log the selection
@@ -202,42 +209,49 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 	fmt.Fprintf(stderr, "Connecting to %s\r\n", remote.Address)
 
 	// Set up the agent
+	useAgent := false
 	select {
 	case <-agentCh:
+		useAgent = true
 	case <-time.After(1 * time.Second):
 		fmt.Fprintf(stderr, "\r\n====== sshmux ======\r\n")
-		fmt.Fprintf(stderr, "sshmux requires either agent forwarding or secure channel forwarding.\r\n")
-		fmt.Fprintf(stderr, "Either enable agent forwarding (-A), or use a ssh -W proxy command.\r\n")
-		fmt.Fprintf(stderr, "For more info, see the sshmux wiki.\r\n")
-		return
+		fmt.Fprintf(stderr, "No agent request received. Public key authentication will not be\r\n")
+		fmt.Fprintf(stderr, "available. Either enable agent forwarding (-A), or use a ssh -W\r\n")
+		fmt.Fprintf(stderr, "proxy command. For more info, see the sshmux wiki.\r\n")
 	}
 
-	agentChan, agentReqs, err := session.Conn.OpenChannel("auth-agent@openssh.com", nil)
-	if err != nil {
-		fmt.Fprintf(stderr, "agent forwarding failed: %+v", err)
-		return
-	}
-	defer agentChan.Close()
-	go ssh.DiscardRequests(agentReqs)
 
 	// Set up the client
-
-	ag := agent.NewClient(agentChan)
-
 	clientConfig := &ssh.ClientConfig{
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		User: session.Conn.User(),
+		User: username,
 		Auth: []ssh.AuthMethod{
-			ssh.PublicKeysCallback(ag.Signers),
 			ssh.KeyboardInteractive(func(user, instruction string, questions []string, echos []bool) ([]string, error) {
 				comm := rw{Reader: sesschan, Writer: stderr}
 				return KeyboardChallenge(comm, user, instruction, questions, echos)
 			}),
 			ssh.PasswordCallback(func() (string, error) {
 				comm := rw{Reader: sesschan, Writer: stderr}
-				return PasswordCallback(comm, session.Conn.User() + "@" + remote.Address + ":")
+				return StringCallback(comm, session.Conn.User() + "@" + remote.Address + ":", true)
 			}),
 		},
+		Timeout: 10 * time.Second,
+	}
+
+	if useAgent {
+		agentChan, agentReqs, err := session.Conn.OpenChannel("auth-agent@openssh.com", nil)
+		if err != nil {
+			fmt.Fprintf(stderr, "agent forwarding failed: %+v", err)
+			return
+		}
+		defer agentChan.Close()
+		go ssh.DiscardRequests(agentReqs)
+		ag := agent.NewClient(agentChan)
+		clientConfig.Auth = append([]ssh.AuthMethod{ssh.PublicKeysCallback(ag.Signers)}, clientConfig.Auth...)
+	}
+
+	if s.ConnectionTimeout != 0 {
+		clientConfig.Timeout = s.ConnectionTimeout
 	}
 
 	conn, err := s.Dialer("tcp", remote.Address)
