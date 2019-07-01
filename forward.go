@@ -103,6 +103,9 @@ func (s *Server) ChannelForward(session *Session, newChannel ssh.NewChannel) {
 	}
 
 	channel, reqs, err := newChannel.Accept()
+	if err != nil {
+		return
+	}
 
 	go ssh.DiscardRequests(reqs)
 	var closer sync.Once
