@@ -220,11 +220,10 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel) {
 		fmt.Fprintf(stderr, "For more info, see the sshmux wiki.\r\n")
 	}
 
-
 	// Set up the client
 	clientConfig := &ssh.ClientConfig{
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		User: username,
+		User:            username,
 		Auth: []ssh.AuthMethod{
 			ssh.KeyboardInteractive(func(user, instruction string, questions []string, echos []bool) ([]string, error) {
 				comm := rw{Reader: sesschan, Writer: stderr}
@@ -232,7 +231,7 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel) {
 			}),
 			ssh.PasswordCallback(func() (string, error) {
 				comm := rw{Reader: sesschan, Writer: stderr}
-				return StringCallback(comm, username + "@" + remote.Address + ":", true)
+				return StringCallback(comm, username+"@"+remote.Address+":", true)
 			}),
 		},
 		Timeout: 10 * time.Second,

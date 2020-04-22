@@ -10,6 +10,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// Remote describes the selectable remote server.
 type Remote struct {
 	// The various names that can be used to select this remote
 	Names []string
@@ -51,16 +52,17 @@ type Session struct {
 
 // Server is the sshmux server instance.
 type Server struct {
-	// Auther checks if a connection is permitted, and returns a user if
+	// Authenticator checks if a connection is permitted, and returns a user if
 	// recognized.. Returning nil error indicates that the login was allowed,
 	// regardless of whether the user was recognized or not. To disallow a
 	// connection, return an error.
-	Auther func(ssh.ConnMetadata, ssh.PublicKey) (*User, error)
+	Authenticator func(ssh.ConnMetadata, ssh.PublicKey) (*User, error)
 
 	// Setup takes a Session, the most important task being filling out the
 	// permitted remote hosts. Returning an error here will send the error to
 	// the user and terminate the connection. This is not as clean as denying
-	// the user in Auther, but can be used in case the denial was too dynamic.
+	// the user in Authenticator, but can be used in case the denial was too
+	// dynamic.
 	Setup func(*Session) error
 
 	// Interactive is called to ask the user to select a host on the list of
@@ -129,7 +131,10 @@ func (s *Server) HandleConn(c net.Conn) {
 		publicKeyType: ext["pubKeyType"],
 	}
 
-	user, err := s.Auther(sshConn, pk)
+	user, err := s.Authenticator(sshConn, pk)
+	if err != nil {
+		return
+	}
 
 	session := &Session{
 		Conn:      sshConn,
@@ -161,7 +166,7 @@ func (s *Server) HandleConn(c net.Conn) {
 		case "tcpip-forward":
 			newChannel.Reject(ssh.UnknownChannelType, "sshmux server cannot remote forward ports, please ProxyJump to a host first")
 		default:
-			newChannel.Reject(ssh.UnknownChannelType, fmt.Sprintf("sshmux server cannot handle %s channel types, please ProxyJump to a host first"))
+			newChannel.Reject(ssh.UnknownChannelType, fmt.Sprintf("sshmux server cannot handle %s channel types, please ProxyJump to a host first", newChannel.ChannelType()))
 		}
 	}
 }
@@ -189,7 +194,7 @@ func (s *Server) auth(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permission
 		},
 	}
 
-	_, err := s.Auther(conn, key)
+	_, err := s.Authenticator(conn, key)
 	if err == nil {
 		return perm, nil
 	}
@@ -200,9 +205,9 @@ func (s *Server) auth(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permission
 // New returns a Server initialized with the provided signer and callbacks.
 func New(signer ssh.Signer, auth func(ssh.ConnMetadata, ssh.PublicKey) (*User, error), setup func(*Session) error) *Server {
 	server := &Server{
-		Auther: auth,
-		Setup:  setup,
-		Dialer: net.Dial,
+		Authenticator: auth,
+		Setup:         setup,
+		Dialer:        net.Dial,
 	}
 
 	server.sshConfig = &ssh.ServerConfig{

@@ -82,7 +82,7 @@ func StringCallback(comm io.ReadWriter, prompt string, hide bool) (string, error
 			switch b[0] {
 			case 0x7F, 0x08:
 				if len(buf) > 0 {
-					buf = buf[0:len(buf)-1]
+					buf = buf[0 : len(buf)-1]
 					if !hide {
 						fmt.Fprintf(comm, "\033[1D \033[1D")
 					}
