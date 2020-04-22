@@ -131,7 +131,7 @@ type rw struct {
 // SessionForward performs a regular forward, providing the user with an
 // interactive remote host selection if necessary. This forwarding type
 // requires agent forwarding in order to work.
-func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, chans <-chan ssh.NewChannel) {
+func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel) {
 
 	// Okay, we're handling this as a regular session
 	sesschan, sessReqs, err := newChannel.Accept()
@@ -216,8 +216,8 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 	case <-time.After(1 * time.Second):
 		fmt.Fprintf(stderr, "\r\n====== sshmux ======\r\n")
 		fmt.Fprintf(stderr, "No agent request received. Public key authentication will not be\r\n")
-		fmt.Fprintf(stderr, "available. Either enable agent forwarding (-A), or use a ssh -W\r\n")
-		fmt.Fprintf(stderr, "proxy command. For more info, see the sshmux wiki.\r\n")
+		fmt.Fprintf(stderr, "available. Either enable agent forwarding (-A), or use a ProxyJump.\r\n")
+		fmt.Fprintf(stderr, "For more info, see the sshmux wiki.\r\n")
 	}
 
 
@@ -232,7 +232,7 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 			}),
 			ssh.PasswordCallback(func() (string, error) {
 				comm := rw{Reader: sesschan, Writer: stderr}
-				return StringCallback(comm, session.Conn.User() + "@" + remote.Address + ":", true)
+				return StringCallback(comm, username + "@" + remote.Address + ":", true)
 			}),
 		},
 		Timeout: 10 * time.Second,
@@ -267,33 +267,6 @@ func (s *Server) SessionForward(session *Session, newChannel ssh.NewChannel, cha
 		return
 	}
 	client := ssh.NewClient(clientConn, clientChans, clientReqs)
-
-	// Handle all incoming channel requests
-	go func() {
-		for newChannel = range chans {
-			if newChannel == nil {
-				return
-			}
-
-			channel2, reqs2, err := client.OpenChannel(newChannel.ChannelType(), newChannel.ExtraData())
-			if err != nil {
-				x, ok := err.(*ssh.OpenChannelError)
-				if ok {
-					newChannel.Reject(x.Reason, x.Message)
-				} else {
-					newChannel.Reject(ssh.Prohibited, "remote server denied channel request")
-				}
-				continue
-			}
-
-			channel, reqs, err := newChannel.Accept()
-			if err != nil {
-				channel2.Close()
-				continue
-			}
-			go proxy(reqs, reqs2, channel, channel2)
-		}
-	}()
 
 	// Forward the session channel
 	channel2, reqs2, err := client.OpenChannel("session", []byte{})

@@ -2,6 +2,7 @@ package sshmux
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -116,9 +117,9 @@ func (s *Server) HandleConn(c net.Conn) {
 		c.Close()
 		return
 	}
+	defer sshConn.Close()
 
 	if sshConn.Permissions == nil || sshConn.Permissions.Extensions == nil {
-		sshConn.Close()
 		return
 	}
 
@@ -138,7 +139,6 @@ func (s *Server) HandleConn(c net.Conn) {
 
 	s.Setup(session)
 
-
 	go func() {
 		for req := range reqs {
 			switch req.Type {
@@ -152,19 +152,17 @@ func (s *Server) HandleConn(c net.Conn) {
 		}
 	}()
 
-	newChannel := <-chans
-	if newChannel == nil {
-		sshConn.Close()
-		return
-	}
-
-	switch newChannel.ChannelType() {
-	case "session":
-		s.SessionForward(session, newChannel, chans)
-	case "direct-tcpip":
-		s.ChannelForward(session, newChannel)
-	default:
-		newChannel.Reject(ssh.UnknownChannelType, "connection flow not supported by sshmux")
+	for newChannel := range chans {
+		switch newChannel.ChannelType() {
+		case "session":
+			go s.SessionForward(session, newChannel)
+		case "direct-tcpip":
+			go s.ChannelForward(session, newChannel)
+		case "tcpip-forward":
+			newChannel.Reject(ssh.UnknownChannelType, "sshmux server cannot remote forward ports, please ProxyJump to a host first")
+		default:
+			newChannel.Reject(ssh.UnknownChannelType, fmt.Sprintf("sshmux server cannot handle %s channel types, please ProxyJump to a host first"))
+		}
 	}
 }
 
